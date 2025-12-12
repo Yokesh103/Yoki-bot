@@ -1,0 +1,13 @@
+{
+  "underlying": "NIFTY",
+  "expiry": "2025-11-27",
+  "spot_price": 22050,
+  "rows": [
+    {"strike": 21800, "type": "CE", "ltp": 180, "oi": 120000},
+    {"strike": 21800, "type": "PE", "ltp": 45, "oi": 98000},
+    {"strike": 22000, "type": "CE", "ltp": 110, "oi": 152000},
+    {"strike": 22000, "type": "PE", "ltp": 98, "oi": 174000},
+    {"strike": 22200, "type": "CE", "ltp": 52, "oi": 88000},
+    {"strike": 22200, "type": "PE", "ltp": 165, "oi": 101000}
+  ]
+}

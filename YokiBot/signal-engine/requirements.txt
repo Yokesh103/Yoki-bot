@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pydantic
+requests
+sqlalchemy
+python-dotenv
+psycopg2-binary   # or sqlite (we use sqlite by default)
+ta 

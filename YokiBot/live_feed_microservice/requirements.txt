@@ -1,0 +1,13 @@
+fastapi>=0.95
+uvicorn[standard]>=0.21
+httpx>=0.24
+pandas>=2.0
+pydantic>=2.0
+aiokafka>=0.8.0
+websockets>=11.0
+scipy>=1.10
+numpy>=1.25
+python-dotenv>=1.0
+orjson>=3.9
+loguru>=0.7.0
+pytest>=7.4 

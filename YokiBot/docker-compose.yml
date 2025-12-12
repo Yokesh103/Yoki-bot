@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+redis:
+image: redis:7
+container_name: yk_redis
+ports:
+- "6379:6379"
+restart: unless-stopped
+
+
+livefeed:
+  build: ./live-feed-microservice
+  container_name: yk_livefeed
+  volumes:
+    - ./live-feed-microservice/app:/app
+    - ./live-feed-microservice/app/.env:/app/.env:ro
+  environment:
+    - PYTHONUNBUFFERED=1
+  ports:
+    - "8300:8300"
+  depends_on:
+    - redis
+  command: uvicorn app.main:app --host 0.0.0.0 --port 8300
+  restart: unless-stopped
+  

@@ -1,0 +1,38 @@
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>YokiBot Monitoring Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; }
+    #events { max-width: 1000px; }
+    .evt { border-bottom: 1px solid #ddd; padding: 6px 0; }
+    .ts { color: #666; font-size: 12px; }
+    .type { font-weight: bold; }
+    .reason { color: #006600; }
+  </style>
+</head>
+<body>
+  <h1>YokiBot Monitoring Dashboard</h1>
+  <p>Live events stream (signals, ticks, alerts). Open multiple tabs to test SSE.</p>
+  <div id="events"></div>
+
+  <script>
+    const es = new EventSource('/events/stream');
+    const container = document.getElementById('events');
+    es.onmessage = function(e) {
+      const data = JSON.parse(e.data);
+      const d = document.createElement('div');
+      d.className = 'evt';
+      const ts = new Date(data.ts || Date.now()).toLocaleTimeString();
+      d.innerHTML = `<span class="ts">[${ts}]</span> <span class="type">${data.topic}</span> <strong>${data.symbol}</strong> <div class="payload"><pre>${JSON.stringify(data.payload,null,2)}</pre></div>`;
+      container.insertBefore(d, container.firstChild);
+      while (container.childNodes.length>200) container.removeChild(container.lastChild);
+    };
+    es.onerror = function(e) {
+      console.error('SSE error', e);
+    };
+  </script>
+</body>
+</html>
