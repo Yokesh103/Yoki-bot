@@ -1,26 +1,31 @@
-import os
+from typing import Dict, Any, List
 import requests
-from typing import List, Dict, Any
-
-UPSTOX_BASE = "https://api.upstox.com/v2"
-ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")
 
 
 class RestMarketDataSource:
+    """
+    Fetches market data from local live_feed_microservice (Dhan),
+    NOT from broker REST API.
+    """
 
-    def __init__(self):
-        if not ACCESS_TOKEN:
-            raise RuntimeError("UPSTOX_ACCESS_TOKEN environment variable not set")
+    LIVE_FEED_BASE = "http://127.0.0.1:8300/live"
 
     def get_snapshot(self, instrument_keys: List[str]) -> Dict[str, Any]:
-        url = f"{UPSTOX_BASE}/market-quote/quotes"
-        params = {"instrument_key": ",".join(instrument_keys)}
+        """
+        Fetch snapshot for multiple instruments from live feed service.
+        Fail-safe: missing instruments return empty data.
+        """
 
-        headers = {
-            "Accept": "application/json",
-            "Authorization": f"Bearer {ACCESS_TOKEN}"
-        }
+        data: Dict[str, Any] = {}
 
-        response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        return response.json()
+        for key in instrument_keys:
+            try:
+                r = requests.get(f"{self.LIVE_FEED_BASE}/{key}", timeout=1)
+                if r.status_code == 200:
+                    data[key] = {
+                        "market_data": r.json()
+                    }
+            except Exception:
+                continue
+
+        return {"data": data}

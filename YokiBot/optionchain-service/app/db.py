@@ -1,15 +1,30 @@
 import sqlite3
 from pathlib import Path
+from typing import List, Dict, Any
 
+# -------------------------------------------------
+# DATABASE PATH
+# -------------------------------------------------
 DB_PATH = Path("data/options.db")
 DB_PATH.parent.mkdir(exist_ok=True)
 
-conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+# -------------------------------------------------
+# CONNECTION FACTORY
+# -------------------------------------------------
+def get_conn():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
+
+# -------------------------------------------------
+# INIT DB
+# -------------------------------------------------
 def init_db():
+    conn = get_conn()
     cur = conn.cursor()
 
-    # ✅ Instrument Master
+    # Instrument master
     cur.execute("""
     CREATE TABLE IF NOT EXISTS instruments (
         instrument_key TEXT PRIMARY KEY,
@@ -22,11 +37,17 @@ def init_db():
     )
     """)
 
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_inst_underlying ON instruments(underlying)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_inst_expiry ON instruments(expiry)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_inst_underlying_expiry ON instruments(underlying, expiry)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_inst_underlying ON instruments(underlying)"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_inst_expiry ON instruments(expiry)"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_inst_underlying_expiry ON instruments(underlying, expiry)"
+    )
 
-    # ✅ Market Snapshots
+    # Market snapshots (optional, future use)
     cur.execute("""
     CREATE TABLE IF NOT EXISTS option_snapshots (
         ts TEXT,
@@ -41,3 +62,45 @@ def init_db():
     """)
 
     conn.commit()
+    conn.close()
+
+
+# -------------------------------------------------
+# QUERIES
+# -------------------------------------------------
+def get_instruments_from_db(underlying: str, expiry: str) -> List[Dict[str, Any]]:
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT *
+        FROM instruments
+        WHERE underlying = ?
+          AND expiry = ?
+        """,
+        (underlying, expiry),
+    )
+
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_expiries_for_underlying(underlying: str) -> List[str]:
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT DISTINCT expiry
+        FROM instruments
+        WHERE underlying = ?
+        ORDER BY expiry ASC
+        """,
+        (underlying,),
+    )
+
+    expiries = [row["expiry"] for row in cur.fetchall()]
+    conn.close()
+    return expiries
