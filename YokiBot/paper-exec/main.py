@@ -1,80 +1,87 @@
-# paper-exec/main.py
-from fastapi import FastAPI
+# YokiBot/paper-exec/main.py
+import uvicorn
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import time, uuid
+import uuid
+import time
 
-app = FastAPI(title="paper-exec")
+app = FastAPI(title="Paper Execution & Ledger")
 
-class ExecReq(BaseModel):
-    order_id: str
-    legs: list
-    qty: int = 25
-    slippage_pct: float = 0.2
+# --- DATABASE (In-Memory for now) ---
+positions = {}
+ledger = {
+    "balance": 100000.0,  # Starting Capital
+    "realized_pnl": 0.0,
+    "charges": 0.0
+}
 
-@app.post("/exec")
-async def call_paper_exec(order: dict):
-    """Robust call to paper-exec with retries, backoff and detailed logging."""
-    print("\n================ ROUTER ==================")
-    print(">>> ENTER call_paper_exec")
-    print(">>> PAPER_EXEC_URL =", PAPER_EXEC_URL)
-    print(">>> ORDER ID =", order["id"])
+class OrderRequest(BaseModel):
+    symbol: str
+    qty: int
+    side: str  # BUY or SELL
+    price: float
+    tag: str = "SIGNAL_ENGINE"
 
-    order["status"] = "routing"
-    order["routed_at"] = time.time()
-    save_order_to_redis(order)
+# --- INDIAN F&O CHARGES CALCULATOR ---
+def calculate_charges(price, qty, side):
+    turnover = price * qty
+    brokerage = 20.0  # Flat 20 Rs per order
+    
+    # Exchange Txn Charge (NSE Options ~0.05%)
+    exch_txn = 0.0005 * turnover
+    
+    # STT (0.125% on SELL only for Options)
+    stt = 0.00125 * turnover if side == "SELL" else 0.0
+    
+    # SEBI Charges (0.0001%)
+    sebi = 0.000001 * turnover
+    
+    # GST (18% on Brokerage + Txn + SEBI)
+    gst = 0.18 * (brokerage + exch_txn + sebi)
+    
+    # Stamp Duty (0.003% on BUY only)
+    stamp = 0.00003 * turnover if side == "BUY" else 0.0
+    
+    total_tax = brokerage + exch_txn + stt + sebi + gst + stamp
+    return round(total_tax, 2)
 
-    payload = {
-        "order_id": order["id"],
-        "symbol": order["symbol"],
-        "legs": order["legs"],
-        "qty": order["qty"],
-        "limit": order.get("limit"),
-        "meta": order.get("meta"),
+@app.get("/health")
+def health():
+    return {"status": "PAPER BOT ONLINE", "capital": ledger["balance"]}
+
+@app.get("/positions")
+def get_positions():
+    return {
+        "open_positions": positions,
+        "ledger": ledger
     }
-    print(">>> PAYLOAD =", payload)
 
-    max_retries = 3
-    backoff = 0.5
-    last_error = None
+@app.post("/place_order")
+def place_order(order: OrderRequest):
+    order_id = str(uuid.uuid4())[:8]
+    tax = calculate_charges(order.price, order.qty, order.side)
+    
+    # Update Ledger
+    ledger["charges"] += tax
+    ledger["balance"] -= tax # Deduct charges immediately
+    
+    # Logic for Opening/Closing positions
+    # (Simplified: Just adding to list for visualization)
+    positions[order_id] = {
+        "symbol": order.symbol,
+        "side": order.side,
+        "qty": order.qty,
+        "entry_price": order.price,
+        "tax": tax,
+        "time": time.strftime("%H:%M:%S")
+    }
+    
+    return {
+        "status": "FILLED",
+        "order_id": order_id,
+        "filled_price": order.price,
+        "charges_deducted": tax
+    }
 
-    async with httpx.AsyncClient(timeout=ROUTE_TIMEOUT) as client:
-        for attempt in range(1, max_retries + 1):
-            try:
-                print(f">>> TRY {attempt} - POST -> {PAPER_EXEC_URL}")
-                resp = await client.post(PAPER_EXEC_URL, json=payload)
-                print(">>> GOT STATUS =", resp.status_code)
-                if resp.status_code == 200:
-                    # successful
-                    try:
-                        data = resp.json()
-                    except Exception as e:
-                        data = {"error": "invalid_json_response", "raw_text": resp.text}
-                        print(">>> JSON PARSE ERROR:", e, resp.text)
-                    order["status"] = data.get("status", "executed")
-                    order["executed_at"] = time.time()
-                    order["exec_result"] = {"attempts": attempt, "response": data}
-                    break
-                else:
-                    # non-200, record text
-                    txt = resp.text
-                    order["status"] = "route_failed"
-                    order["exec_result"] = {"attempts": attempt, "status_code": resp.status_code, "text": txt}
-                    last_error = f"status:{resp.status_code}"
-                    # do not break — you may want to retry non-200 depending on your policy
-            except Exception as e:
-                last_error = str(e)
-                print(f">>> EXCEPTION on attempt {attempt}:", e)
-                order["exec_result"] = {"attempts": attempt, "error": last_error}
-                # backoff before next retry
-                await asyncio.sleep(backoff)
-                backoff *= 2
-                continue
-        else:
-            # exhausted retries
-            order["status"] = "route_error"
-            order["exec_result"] = {"error": last_error, "attempts": max_retries}
-
-    # final save
-    save_order_to_redis(order)
-    print(">>> FINAL ORDER SAVED:", order["id"], "status=", order["status"])
-    print("===========================================\n")
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8400)
