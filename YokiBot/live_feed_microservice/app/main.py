@@ -1,63 +1,60 @@
 import asyncio
 import os
 import time
-from dotenv import load_dotenv
+import logging
+import redis.asyncio as redis
 from fastapi import FastAPI
-import redis.asyncio as redis  # ✅ ASYNC REDIS
+from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 
-# --------------------------------------------------
-# 1. LOAD ENV FIRST
-# --------------------------------------------------
+# We will create dhan_feed.py in the next step
+from app.dhan_feed import DhanFeed
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("LIVE_FEED")
 load_dotenv()
 
-# --------------------------------------------------
-# 2. REDIS SETUP (LOCAL, NO CROSS-IMPORTS)
-# --------------------------------------------------
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_URL = f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', 6379)}"
+CLIENT_ID = os.getenv("DHAN_CLIENT_ID")
+ACCESS_TOKEN = os.getenv("DHAN_ACCESS_TOKEN")
 
-REDIS = redis.Redis(
-    host=REDIS_HOST,
-    port=REDIS_PORT,
-    decode_responses=True,
-)
+redis_client = None
+feed_task = None
 
-# --------------------------------------------------
-# 3. INTERNAL IMPORTS (AFTER ENV)
-# --------------------------------------------------
-from app.instrument_map import load_instruments
-from app.dhan_ws import dhan_ws_worker
+def load_instruments():
+    """
+    Standard Config for NIFTY 50 & BANK NIFTY (NSE)
+    """
+    # 1 = NSE Equity Segment
+    # 13 = Nifty 50 Index
+    # 25 = Nifty Bank Index
+    instruments = [
+        (1, "13"),  
+        (1, "25")
+    ]
+    
+    logger.info(f"Loaded {len(instruments)} instruments to track (NIFTY/BANKNIFTY).")
+    return instruments
 
-# --------------------------------------------------
-# 4. APP INSTANCE
-# --------------------------------------------------
-app = FastAPI(title="DhanHQ Live Feed Microservice")
-CSV_PATH = "api-scrip-master-detailed.csv"
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global redis_client, feed_task
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    instruments = load_instruments()
+    
+    # Start the WebSocket Feed
+    feed = DhanFeed(CLIENT_ID, ACCESS_TOKEN, instruments, redis_client)
+    feed_task = asyncio.create_task(feed.run_forever())
+    yield
+    if feed_task: feed_task.cancel()
+    await redis_client.close()
 
-# --------------------------------------------------
-# 5. STARTUP EVENT
-# --------------------------------------------------
-@app.on_event("startup")
-async def startup_event():
-    print(f"[LIVE_FEED] DHAN_CLIENT_ID loaded: {os.getenv('DHAN_CLIENT_ID')}")
+app = FastAPI(lifespan=lifespan)
 
-    try:
-        load_instruments(CSV_PATH)
-    except Exception as e:
-        print(f"[ERROR] Failed to load CSV: {e}")
-
-    asyncio.create_task(dhan_ws_worker())
-
-# --------------------------------------------------
-# 6. ROUTES
-# --------------------------------------------------
 @app.get("/live_status")
 async def live_status():
-    last_packet = await REDIS.get("live:last_packet_ts")
-    return {
-        "last_ws_packet_ts": last_packet,
-        "now": time.time(),
-    }
+    ts = await redis_client.get("live:last_packet_ts")
+    return {"status": "ONLINE", "last_ws_packet_ts": ts, "now": time.time()}
 
 @app.get("/health")
 def health():
